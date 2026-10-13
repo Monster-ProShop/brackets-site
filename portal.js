@@ -153,7 +153,7 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     $('userDashboardTabs').classList.toggle('hidden',admin);
     $('usersAccess').classList.toggle('hidden',!superAdmin);
     $('accountEmail').textContent = user.email;
-    const [sessions,leaders,career]=await Promise.all([Promise.all(rows.map(c=>api('/sessions?competition_id='+encodeURIComponent(c.id)))),Promise.all(rows.map(c=>api('/monthly-bracket-leader?competition_id='+encodeURIComponent(c.id)))),admin?Promise.resolve(null):api('/career-summary')]);
+    const [sessions,leaderResults,career]=await Promise.all([Promise.all(rows.map(c=>api('/sessions?competition_id='+encodeURIComponent(c.id)))),Promise.allSettled(rows.map(c=>api('/monthly-bracket-leader?competition_id='+encodeURIComponent(c.id)))),admin?Promise.resolve(null):api('/career-summary')]),leaders=leaderResults.map(result=>result.status==='fulfilled'?result.value:null);
     if(career)renderCareerSummary(career);
     showDashboardTab('competitions');
     $('competitionCards').innerHTML = rows.map((c,i) => {
