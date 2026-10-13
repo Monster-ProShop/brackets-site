@@ -153,13 +153,14 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     $('userDashboardTabs').classList.toggle('hidden',admin);
     $('usersAccess').classList.toggle('hidden',!superAdmin);
     $('accountEmail').textContent = user.email;
-    const [sessions,career]=await Promise.all([Promise.all(rows.map(c=>api('/sessions?competition_id='+encodeURIComponent(c.id)))),admin?Promise.resolve(null):api('/career-summary')]);
+    const [sessions,leaders,career]=await Promise.all([Promise.all(rows.map(c=>api('/sessions?competition_id='+encodeURIComponent(c.id)))),Promise.all(rows.map(c=>api('/monthly-bracket-leader?competition_id='+encodeURIComponent(c.id)))),admin?Promise.resolve(null):api('/career-summary')]);
     if(career)renderCareerSummary(career);
     showDashboardTab('competitions');
     $('competitionCards').innerHTML = rows.map((c,i) => {
       const canManage=!!(admin&&c.can_manage);
+      const monthly=leaders[i],leader=monthly?.leader,monthLabel=monthly?.month?new Intl.DateTimeFormat(window.BowlingApp?.language()==='es'?'es-MX':'en-US',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(monthly.month+'-01T00:00:00Z')):'';
       return '<article class="card competition-card" data-competition-search="'+esc([c.name,c.manager_name,c.manager_email,c.country,c.region,c.city,c.bowling_center].filter(Boolean).join(' ').toLowerCase())+'"><h3>' + esc(c.name||'Unnamed competition') + '</h3><p>' + esc(c.kind) +
-      ' · ' + esc(c.status) + '</p><button data-open="' + esc(c.id) + '">' +
+      ' · ' + esc(c.status) + '</p>'+(leader?'<section class="monthly-leader"><span>Bowler of the Month</span><strong>'+esc(leader.name)+'</strong><b>'+esc(Number(leader.winPercentage).toFixed(1))+'% bracket win rate</b><small>'+esc(monthLabel)+' · '+esc(leader.bracketsWon)+' of '+esc(leader.bracketsPlayed)+' brackets won</small></section>':'')+'<button data-open="' + esc(c.id) + '">' +
       (canManage ? 'Manage current session' : 'View current session') + '</button>'+(canManage?'<button type="button" class="secondary" data-linked-accounts="'+esc(c.id)+'">Manage Bowler Linked Accounts</button><button type="button" class="secondary" data-roster="'+esc(c.id)+'">Permanent roster</button><button type="button" class="secondary" data-edit-competition="'+esc(c.id)+'">Edit details</button>':'<button type="button" class="danger" data-remove-league="'+esc(c.id)+'">Remove from my dashboard</button>')+((superAdmin||c.owner_user_id===user.id)?'<button type="button" class="danger" data-delete-competition="'+esc(c.id)+'" data-competition-name="'+esc(c.name||'Unnamed competition')+'">Delete league/tournament</button>':'')+'<div class="session-list"><strong>Saved sessions · '+new Date().getFullYear()+'</strong>'+
       (sessions[i].length?sessions[i].map(x=>'<div class="session-row"><span>'+esc(x.label)+'<br><small>'+esc(String(x.session_date).slice(0,10))+'</small></span><button class="secondary" data-session="'+esc(x.id)+'">View</button></div>').join(''):'<p class="hint">No saved sessions yet.</p>')+
       '<button type="button" class="secondary" data-previous="'+esc(c.id)+'">View previous years</button><div data-previous-list="'+esc(c.id)+'"></div></div></article>'
