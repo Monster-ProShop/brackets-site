@@ -295,6 +295,12 @@ function buildBrackets(bowlers,type) {
   // produces the fewest repeated first-round opponent matchups.
   return result.map(ids=>seedBracket(ids,matchups));
 }
+function buildAdditionalBrackets(bowlers,type,existing=[]) {
+  const prop=type==='hdcp'?'hdcpCount':'scratchCount',used=new Map();
+  existing.flat().filter(Boolean).forEach(id=>used.set(id,(used.get(id)||0)+1));
+  const remaining=bowlers.map(bowler=>({...bowler,[prop]:Math.max(0,Number(bowler[prop]||0)-(used.get(bowler.id)||0))}));
+  return buildBrackets(remaining,type);
+}
 function pairCount(data,id) { return data.pairs.filter(ids=>ids.includes(id)).length; }
 function addTeamByNames(data,name1,name2) {
   const find=name=>data.bowlers.find(b=>b.name.toLocaleLowerCase()===name.trim().toLocaleLowerCase());
@@ -690,9 +696,10 @@ function setup() {
     if(remove){const b=state.bowlers.find(x=>x.id===remove.dataset.remove);if(!b||!confirm('Remove '+b.name+' and their Doubles teams?'))return;state.bowlers=state.bowlers.filter(x=>x.id!==b.id);state.brackets={hdcp:[],scratch:[]};state.generated=false;state.pairs=state.pairs.filter(ids=>!ids.includes(b.id));persist();render();status('Bowler and their Doubles teams removed. Generate brackets again.');}
   });
   document.getElementById('generate').addEventListener('click',()=>{
-    state.brackets={hdcp:buildBrackets(state.bowlers,'hdcp'),scratch:buildBrackets(state.bowlers,'scratch')};state.generated=true;persist();render();
-    const total=state.brackets.hdcp.length+state.brackets.scratch.length;
-    status(total?total+' bracket'+(total===1?'':'s')+' generated.':'No brackets generated. At least eight different bowlers must join an event.');
+    const added={hdcp:buildAdditionalBrackets(state.bowlers,'hdcp',state.brackets.hdcp),scratch:buildAdditionalBrackets(state.bowlers,'scratch',state.brackets.scratch)};
+    state.brackets={hdcp:[...state.brackets.hdcp,...added.hdcp],scratch:[...state.brackets.scratch,...added.scratch]};state.generated=state.brackets.hdcp.length+state.brackets.scratch.length>0;persist();render();
+    const total=added.hdcp.length+added.scratch.length;
+    status(total?total+' new bracket'+(total===1?'':'s')+' generated. Existing brackets were preserved.':'No additional complete brackets can be generated from the remaining entries.');
   });
   const saveSection=async(section)=>{
     const brackets=section==='brackets',button=document.getElementById(brackets?'saveBrackets':'saveScores'),saveState=document.getElementById(brackets?'bracketSaveState':'scoreSaveState');
