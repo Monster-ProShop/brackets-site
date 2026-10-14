@@ -114,6 +114,7 @@ const ES = {
   'Total winnings':'Premios totales','Total won':'Total ganado','Paid:':'Pagado:','Outstanding:':'Pendiente:',
   'Configuration changed. Select Save payout configuration to keep it.':'La configuración cambió. Seleccione Guardar configuración de premios para conservarla.',
   'Changes not saved yet.':'Los cambios todavía no se han guardado.','Saving…':'Guardando…','Saved to Neon.':'Guardado en Neon.',
+  'Upload Scores':'Subir puntuaciones','Save All & Lock Scores':'Guardar todo y bloquear puntuaciones','Edit Scores':'Editar puntuaciones','Saving score…':'Guardando puntuación…','Scores saved to Neon.':'Puntuaciones guardadas en Neon.','Scores are locked. Use Edit Scores to make a correction.':'Las puntuaciones están bloqueadas. Use Editar puntuaciones para corregirlas.','Scores save automatically. Upload Scores checks that all entered scores reached the database.':'Las puntuaciones se guardan automáticamente. Subir puntuaciones verifica que todas estén en la base de datos.',
   'Save brackets':'Guardar brackets','Save scores':'Guardar puntuaciones','Brackets saved and verified in Neon.':'Brackets guardados y verificados en Neon.','Scores saved and verified in Neon.':'Puntuaciones guardadas y verificadas en Neon.',
   'Saving brackets…':'Guardando brackets…','Saving scores…':'Guardando puntuaciones…','The brackets were not saved.':'No se guardaron los brackets.','The scores were not saved.':'No se guardaron las puntuaciones.',
   'Could not save.':'No se pudo guardar.','Try again.':'Inténtelo de nuevo.','Payout configuration saved.':'Configuración de premios guardada.',
@@ -560,6 +561,11 @@ function render() {
   document.getElementById('bracketNotice').innerHTML=state.generated&&unused.length?'<p class="notice">Willingness above the available full brackets: '+safe(unused.join(' · '))+'</p>':'';
   const scoringIds=new Set([...state.brackets.hdcp.flat(),...state.brackets.scratch.flat(),...state.pairs.flat()].filter(Boolean)),scoringBowlers=state.bowlers.filter(b=>scoringIds.has(b.id)||b.high);
   document.getElementById('scoreRows').innerHTML=scoringBowlers.map(b=>'<tr><td>'+safe(b.name)+' (+'+b.handicap+')</td>'+[1,2,3].map(g=>'<td><input aria-label="'+safe(b.name)+' game '+g+'" data-score="'+safe(b.id)+'" data-game="g'+g+'" type="number" min="0" max="300" step="1" value="'+(b.scores['g'+g]??'')+'"></td>').join('')+'<td>'+(complete(b)?series(b):'—')+'</td><td>'+(complete(b)?series(b,true):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No event participants.</td></tr>';
+  document.querySelectorAll('[data-score]').forEach(input=>input.disabled=!!state.scoresLocked);
+  document.getElementById('lockScores').classList.toggle('hidden',!!state.scoresLocked);
+  document.getElementById('editScores').classList.toggle('hidden',!state.scoresLocked);
+  document.getElementById('generate').disabled=!!state.scoresLocked;
+  document.getElementById('scoreLockStatus').textContent=state.scoresLocked?'Scores are locked. Use Edit Scores to make a correction.':'Scores save automatically. Upload Scores checks that all entered scores reached the database.';
   document.getElementById('scorePairsRows').innerHTML=pairedTeams(state).map((team,i)=>'<tr><td>Team #'+(i+1)+' — '+safe(team.map(b=>b.name).join(' & '))+'</td>'+[1,2,3].map(g=>'<td>'+(team.every(b=>hasGame(b,g))?pairGame(team,g):'—')+'</td>').join('')+'<td>'+(team.every(complete)?pairBest(team):'—')+'</td><td>'+(team.every(complete)?pairSeries(team):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No Doubles teams added yet.</td></tr>';
   renderHighGame();
   renderPairs();
@@ -712,6 +718,13 @@ function setup() {
   };
   document.getElementById('saveBrackets').addEventListener('click',()=>void saveSection('brackets'));
   document.getElementById('saveScores').addEventListener('click',()=>void saveSection('scores'));
+  document.getElementById('uploadScoresBottom').addEventListener('click',()=>void saveSection('scores'));
+  for(const [id,locked] of [['lockScores',true],['editScores',false]])document.getElementById(id).addEventListener('click',async()=>{
+    const button=document.getElementById(id);button.disabled=true;
+    try{if(globalThis.MONSTER_PORTAL_MODE)await globalThis.MonsterPortal.setScoresLocked(locked);else{state.scoresLocked=locked;persist();render();}}
+    catch(error){document.getElementById('scoreLockStatus').textContent=error.message;status(error.message);}
+    finally{button.disabled=false;}
+  });
   document.getElementById('generateHigh').addEventListener('click',()=>{state.highGenerated=true;persist();render();status('High Game standings updated.');});
   const pairMessage=(id)=>{
     const input=document.getElementById('pairName'+id),help=document.getElementById('pairHelp'+id),value=input.value.trim().toLocaleLowerCase();
@@ -754,10 +767,10 @@ function setup() {
     setTimeout(()=>URL.revokeObjectURL(link.href),1000);
   });
   document.getElementById('scoreRows').addEventListener('change',e=>{
-    const id=e.target.dataset.score;if(!id)return;const b=state.bowlers.find(x=>x.id===id);if(!b)return;
+    const id=e.target.dataset.score;if(!id||state.scoresLocked)return;const b=state.bowlers.find(x=>x.id===id);if(!b)return;
     const raw=e.target.value;
     if(raw!==''&&(!Number.isInteger(Number(raw))||Number(raw)<0||Number(raw)>300)){status('Enter a whole game score from 0 to 300.');render();return;}
-    b.scores[e.target.dataset.game]=raw===''?null:Number(raw);persist();render();status('Score saved.');
+    b.scores[e.target.dataset.game]=raw===''?null:Number(raw);persist();render();status(globalThis.MONSTER_PORTAL_MODE?'Saving score…':'Score saved.');
   });
   document.getElementById('printPayouts').addEventListener('click',()=>void printPayoutsSummary().catch(error=>status(error.message||'Could not prepare the payout printout.')));
   document.getElementById('saveSession').addEventListener('click',async()=>{
@@ -816,24 +829,25 @@ if(typeof window!=='undefined') window.BowlingApp={
     resetForm();render();
   },
   getState(){return structuredClone(state);},
+  setSessionId(value){state._sessionId=value;delete state._startNewSession;delete state._replaceBracketDraw;},
   setServerRevision(value){state._serverUpdatedAt=value;},
   exportBackup:downloadBackup,
   bracketGraphic,
-  snapshot(){
-    const report=reportSummary(state),awards=calculate(state).awards;
-    const names=Object.fromEntries(state.bowlers.map(b=>[b.id,b.name]));
+  snapshot(data=state){
+    const report=reportSummary(data),awards=calculate(data).awards;
+    const names=Object.fromEntries(data.bowlers.map(b=>[b.id,b.name]));
     const publicData={
       updatedAt:new Date().toISOString(),
-      bowlers:state.bowlers.map(({id,name,handicap,scores,high})=>({id,name,handicap,scores,high})),
-      brackets:state.brackets,
-      pairs:state.pairs,
+      bowlers:data.bowlers.map(({id,name,handicap,scores,high})=>({id,name,handicap,scores,high})),
+      brackets:data.brackets,
+      pairs:data.pairs,
       awards:awards.map(({id,category,description,amount})=>({name:names[id]||'Bowler',category,description,amount})),
       pending:report.pending,
-      matchups:matchupSummary(state),
-      standings:[1,2,3].map(g=>state.bowlers.filter(b=>hasGame(b,g)).map(b=>({name:b.name,score:game(b,g,true)})).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name)))
-      ,summary:competitionSummary(state)
+      matchups:matchupSummary(data),
+      standings:[1,2,3].map(g=>data.bowlers.filter(b=>hasGame(b,g)).map(b=>({name:b.name,score:game(b,g,true)})).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name)))
+      ,summary:competitionSummary(data)
     };
-    const personal=state.bowlers.filter(b=>b.email).map(b=>({
+    const personal=data.bowlers.filter(b=>b.email).map(b=>({
       email:b.email.trim().toLowerCase(),
       data:report.rows.find(r=>r.id===b.id)
     }));

@@ -83,7 +83,7 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
         updateAuthButton();
         notice('Your session expired. Log in again to continue; the information on this screen is preserved.');
       }
-      throw new Error(data.error || 'Request failed');
+      const error=new Error(data.error || 'Request failed');error.status=result.status;throw error;
     }
     if(user){sessionExpired=false;updateAuthButton();if(expiredNoticeVisible())notice('');}
     return data;
@@ -253,6 +253,7 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
       location.href = '/DeLaRosaMasters/?competition='+encodeURIComponent(competition.id);
       return;
     }
+    if(saving||saveJob)await flushSaves();
     current = competition;
     $('currentCompetition').textContent = competition.name;
     $('viewerCompetition').textContent = competition.name;
@@ -260,9 +261,19 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     if (admin&&competition.can_manage) {
       await loadPermanentRoster(id);
       const state = await api('/state?id=' + encodeURIComponent(id));
-      window.BowlingApp.setState(state?.bowlers ? state : window.BowlingApp.fresh());
+      serverBase=structuredClone(state?{...window.BowlingApp.fresh(),...state}:window.BowlingApp.fresh());
+      window.BowlingApp.setState(serverBase);
+      $('sessionLabel').value=serverBase.sessionLabel||'';$('sessionDate').value=serverBase.sessionDate||new Date().toLocaleDateString('en-CA');
+      let recovered=false;
+      try{
+        const draft=JSON.parse(localStorage.getItem(draftKey(id))||'null');
+        if(draft){
+          const restored=window.MonsterSaveMerge.merge(draft.base,draft.p_state,serverBase);
+          window.BowlingApp.setState(restored);queueSave(restored);recovered=true;
+        }
+      }catch(error){notice('Pending edits are stored on this computer. '+error.message);show('managerApp');return;}
       show('managerApp');
-      notice('Editing ' + competition.name + '. Changes save to Neon.');
+      if(!recovered)notice('Editing ' + competition.name + '. Changes save to Neon.');
       return;
     }
     const result = await api('/results?id=' + encodeURIComponent(id));
@@ -380,10 +391,18 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     window.print();
     setTimeout(cleanup,60000);
   }
+  let serverBase=null;
+  const draftKey=id=>'prodrillos-pending:'+user.id+':'+id;
+  function keepDraft(job){
+    try{localStorage.setItem(draftKey(job.p_competition_id),JSON.stringify({...job,savedLocallyAt:new Date().toISOString()}));}
+    catch{notice('This computer could not keep a recovery copy. Keep this page open until the server confirms the save.');}
+  }
   function queueSave(data) {
     if (!current || !admin) return;
     const snapshot = window.BowlingApp.snapshot();
-    saveJob = {p_competition_id:current.id,p_state:structuredClone(data),p_results:snapshot.publicData,p_personal:snapshot.personal};
+    saveJob = {p_competition_id:current.id,p_state:structuredClone(data),p_results:snapshot.publicData,p_personal:snapshot.personal,base:structuredClone(serverBase)};
+    keepDraft(saveJob);
+    notice('Saving changes…');
     if (!saving) void drainSaves();
   }
   async function drainSaves() {
@@ -392,12 +411,30 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
       const job = saveJob;
       saveJob = null;
       try {
-        const saved=await api('/save?id=' + encodeURIComponent(job.p_competition_id),'POST',
-          {state:job.p_state,results:job.p_results,personal:job.p_personal,eventDate:new Date().toLocaleDateString('en-CA')});
-        if(saved.updatedAt){window.BowlingApp.setServerRevision(saved.updatedAt);if(saveJob)saveJob.p_state._serverUpdatedAt=saved.updatedAt;}
+        const jobSnapshot=window.BowlingApp.snapshot(job.p_state);job.p_results=jobSnapshot.publicData;job.p_personal=jobSnapshot.personal;
+        let saved;
+        for(let attempt=0;attempt<3;attempt++){
+        try{saved=await api('/save?id=' + encodeURIComponent(job.p_competition_id),'POST',
+          {state:job.p_state,results:job.p_results,personal:job.p_personal,eventDate:new Date().toLocaleDateString('en-CA')});break;}
+        catch(error){
+          if(error.status!==409||job.p_state._startNewSession||job.p_state._replaceBracketDraw||attempt===2)throw error;
+          const latest=await api('/state?id='+encodeURIComponent(job.p_competition_id));
+          const merged=window.MonsterSaveMerge.merge(job.base,job.p_state,latest);
+          if(saveJob){saveJob.p_state=window.MonsterSaveMerge.merge(job.p_state,saveJob.p_state,merged);saveJob.base=structuredClone(latest);keepDraft(saveJob);}
+          job.base=structuredClone(latest);job.p_state=merged;
+          const snapshot=window.BowlingApp.snapshot(merged);job.p_results=snapshot.publicData;job.p_personal=snapshot.personal;
+          if(current?.id===job.p_competition_id)window.BowlingApp.setState(saveJob?.p_state||merged);
+          keepDraft(saveJob||job);
+        }
+        }
+        serverBase=structuredClone(job.p_state);serverBase._serverUpdatedAt=saved.updatedAt;serverBase._sessionId=saved.sessionId;delete serverBase._startNewSession;delete serverBase._replaceBracketDraw;
+        if(saved.sessionId){window.BowlingApp.setSessionId(saved.sessionId);if(saveJob){saveJob.p_state._sessionId=saved.sessionId;if(saveJob.base)saveJob.base._sessionId=saved.sessionId;if(job.p_state._startNewSession)delete saveJob.p_state._startNewSession;if(job.p_state._replaceBracketDraw&&JSON.stringify(job.p_state.brackets)===JSON.stringify(saveJob.p_state.brackets))delete saveJob.p_state._replaceBracketDraw;}}
+        if(!saveJob){try{localStorage.removeItem(draftKey(job.p_competition_id));}catch{}}
+        if(saved.updatedAt){window.BowlingApp.setServerRevision(saved.updatedAt);if(saveJob){saveJob.p_state._serverUpdatedAt=saved.updatedAt;keepDraft(saveJob);}}
       }
-      catch (error) { saveJob = saveJob || job; notice('Save failed: ' + error.message + '. Your edits remain on this screen.'); break; }
+      catch (error) { saveJob = saveJob || job;keepDraft(saveJob);if($('scoreSaveState'))$('scoreSaveState').textContent='Not saved to server. '+error.message; notice('Save failed: ' + error.message + '. Your edits remain on this screen.'); break; }
       notice('Saved to Neon at ' + new Date().toLocaleTimeString());
+      if($('scoreSaveState'))$('scoreSaveState').textContent='Scores saved to Neon.';
     }
     saving = false;
   }
@@ -410,15 +447,24 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
   }
   async function saveNow(section) {
     if(!current||!admin)throw new Error('Manager access required.');
-    const local=window.BowlingApp.getState();
+    let local=window.BowlingApp.getState();
     queueSave(local);
     await flushSaves();
+    local=window.BowlingApp.getState();
     const stored=await api('/state?id='+encodeURIComponent(current.id));
     const matches=section==='brackets'
       ? stored?.generated===local.generated&&JSON.stringify(stored?.brackets||{})===JSON.stringify(local.brackets||{})
       : JSON.stringify((stored?.bowlers||[]).map(b=>[b.id,b.scores]))===JSON.stringify((local.bowlers||[]).map(b=>[b.id,b.scores]));
     if(!matches)throw new Error('Neon did not return the latest '+section+'. Keep this page open and try again.');
     notice((section==='brackets'?'Brackets':'Scores')+' saved and verified in Neon.');
+    return {saved:true};
+  }
+  async function setScoresLocked(locked){
+    await saveNow('scores');
+    const revision=window.BowlingApp.getState()._serverUpdatedAt;
+    const saved=await api('/scores-lock?id='+encodeURIComponent(current.id),'POST',{locked,revision});
+    serverBase=structuredClone(saved);window.BowlingApp.setState(saved);
+    notice(locked?'All scores saved and locked.':'Scores reopened for corrections.');
     return {saved:true};
   }
   async function saveConfiguration(config) {
@@ -485,7 +531,7 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     const previous=window.BowlingApp.getState(),blank=window.BowlingApp.fresh();
     blank.config={...previous.config};blank.language=previous.language;
     blank.bowlers=previous.bowlers.map(bowler=>({...bowler,hdcpCount:0,scratchCount:0,high:false,pairs:false,paid:false,scores:{g1:null,g2:null,g3:null}}));
-    blank._startNewSession=true;
+    blank._startNewSession=true;blank._serverUpdatedAt=previous._serverUpdatedAt;blank._sessionId=previous._sessionId;
     try {
       window.BowlingApp.setState(blank);queueSave(blank);await flushSaves();
     } catch(error) { window.BowlingApp.setState(previous);throw error; }
@@ -493,7 +539,9 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     document.querySelector('[data-tab="registration"]').click();
     notice('A new session is ready with the roster and handicaps preserved.');return {started:true};
   }
-  window.MonsterPortal = {persist:queueSave,saveNow,saveSession,startFresh,flush:flushSaves,saveConfiguration,savePayment,profileForName};
+  window.addEventListener('online',()=>{if(saveJob&&!saving)void drainSaves();});
+  window.addEventListener('beforeunload',event=>{if(saving||saveJob){event.preventDefault();event.returnValue='';}});
+  window.MonsterPortal = {persist:queueSave,saveNow,setScoresLocked,saveSession,startFresh,flush:flushSaves,saveConfiguration,savePayment,profileForName};
 
   async function boot() {
     if (!cfg.url || !cfg.apiUrl) {
