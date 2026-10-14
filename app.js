@@ -53,6 +53,7 @@ const ES = {
   'needs the next score only from bowlers still competing.':'solo necesita la siguiente puntuación de los jugadores que siguen compitiendo.',
   'No bowlers registered for High Game Pot.':'No hay jugadores registrados para Linea Alta.',
   'No brackets generated. At least eight different bowlers must select this event.':'No se generaron brackets. Se necesitan al menos ocho jugadores distintos en este evento.',
+  'No event participants.':'No hay participantes en eventos.',
   'No participants.':'Sin participantes.','No winnings':'Sin premios','No entries':'Sin inscripciones',
   'No bowlers registered yet.':'Todavía no hay jugadores registrados.','No Doubles teams added yet.':'Todavía no hay Parejas Virtuales agregadas.',
   'Payouts appear after every team bowler has all three scores.':'Los premios aparecerán cuando todos los integrantes tengan tres puntuaciones.',
@@ -178,6 +179,7 @@ function translateText(original) {
     .replace(/^(.+) marked paid\. Full winnings are now payable\.$/,'$1 marcado como pagado. Ahora corresponde pagar todos los premios.')
     .replace(/^(.+) marked unpaid\. Entry charges will be deducted from winnings\.$/,'$1 marcado como no pagado. Los cargos de inscripción se descontarán de los premios.')
     .replace(/^Remove (.+) and their Doubles teams\?$/,'¿Eliminar a $1 y sus equipos de Parejas Virtuales?')
+    .replace(/^(\d+) brackets? generated with new pairings\.$/,'Se generaron $1 brackets con nuevos enfrentamientos.')
     .replace(/^(\d+) brackets? generated\.$/,'Se generaron $1 brackets.')
     .replace(/^Team #(\d+)/,'Equipo n.º $1').replace(/^Pair #(\d+)/,'Pareja Virtual n.º $1')
     .replace(/Doubles high game/g,'Linea Alta de Parejas Virtuales').replace(/Doubles series/g,'Serie de Parejas Virtuales')
@@ -294,12 +296,6 @@ function buildBrackets(bowlers,type) {
   // Among all 105 possible pairings in an eight-slot bracket, choose one that
   // produces the fewest repeated first-round opponent matchups.
   return result.map(ids=>seedBracket(ids,matchups));
-}
-function buildAdditionalBrackets(bowlers,type,existing=[]) {
-  const prop=type==='hdcp'?'hdcpCount':'scratchCount',used=new Map();
-  existing.flat().filter(Boolean).forEach(id=>used.set(id,(used.get(id)||0)+1));
-  const remaining=bowlers.map(bowler=>({...bowler,[prop]:Math.max(0,Number(bowler[prop]||0)-(used.get(bowler.id)||0))}));
-  return buildBrackets(remaining,type);
 }
 function pairCount(data,id) { return data.pairs.filter(ids=>ids.includes(id)).length; }
 function addTeamByNames(data,name1,name2) {
@@ -562,7 +558,8 @@ function render() {
   }
   const unused=state.bowlers.flatMap(b=>['hdcp','scratch'].map(t=>{const n=b[t+'Count']-assignedCount(t,b.id);return n>0?b.name+': '+n+' unused '+t+' '+(n===1?'spot':'spots'):null;})).filter(Boolean);
   document.getElementById('bracketNotice').innerHTML=state.generated&&unused.length?'<p class="notice">Willingness above the available full brackets: '+safe(unused.join(' · '))+'</p>':'';
-  document.getElementById('scoreRows').innerHTML=state.bowlers.map(b=>'<tr><td>'+safe(b.name)+' (+'+b.handicap+')</td>'+[1,2,3].map(g=>'<td><input aria-label="'+safe(b.name)+' game '+g+'" data-score="'+safe(b.id)+'" data-game="g'+g+'" type="number" min="0" max="300" step="1" value="'+(b.scores['g'+g]??'')+'"></td>').join('')+'<td>'+(complete(b)?series(b):'—')+'</td><td>'+(complete(b)?series(b,true):'—')+'</td></tr>').join('')||'<tr><td colspan="6">Register bowlers first.</td></tr>';
+  const scoringIds=new Set([...state.brackets.hdcp.flat(),...state.brackets.scratch.flat(),...state.pairs.flat()].filter(Boolean)),scoringBowlers=state.bowlers.filter(b=>scoringIds.has(b.id)||b.high);
+  document.getElementById('scoreRows').innerHTML=scoringBowlers.map(b=>'<tr><td>'+safe(b.name)+' (+'+b.handicap+')</td>'+[1,2,3].map(g=>'<td><input aria-label="'+safe(b.name)+' game '+g+'" data-score="'+safe(b.id)+'" data-game="g'+g+'" type="number" min="0" max="300" step="1" value="'+(b.scores['g'+g]??'')+'"></td>').join('')+'<td>'+(complete(b)?series(b):'—')+'</td><td>'+(complete(b)?series(b,true):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No event participants.</td></tr>';
   document.getElementById('scorePairsRows').innerHTML=pairedTeams(state).map((team,i)=>'<tr><td>Team #'+(i+1)+' — '+safe(team.map(b=>b.name).join(' & '))+'</td>'+[1,2,3].map(g=>'<td>'+(team.every(b=>hasGame(b,g))?pairGame(team,g):'—')+'</td>').join('')+'<td>'+(team.every(complete)?pairBest(team):'—')+'</td><td>'+(team.every(complete)?pairSeries(team):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No Doubles teams added yet.</td></tr>';
   renderHighGame();
   renderPairs();
@@ -696,10 +693,9 @@ function setup() {
     if(remove){const b=state.bowlers.find(x=>x.id===remove.dataset.remove);if(!b||!confirm('Remove '+b.name+' and their Doubles teams?'))return;state.bowlers=state.bowlers.filter(x=>x.id!==b.id);state.brackets={hdcp:[],scratch:[]};state.generated=false;state.pairs=state.pairs.filter(ids=>!ids.includes(b.id));persist();render();status('Bowler and their Doubles teams removed. Generate brackets again.');}
   });
   document.getElementById('generate').addEventListener('click',()=>{
-    const added={hdcp:buildAdditionalBrackets(state.bowlers,'hdcp',state.brackets.hdcp),scratch:buildAdditionalBrackets(state.bowlers,'scratch',state.brackets.scratch)};
-    state.brackets={hdcp:[...state.brackets.hdcp,...added.hdcp],scratch:[...state.brackets.scratch,...added.scratch]};state.generated=state.brackets.hdcp.length+state.brackets.scratch.length>0;persist();render();
-    const total=added.hdcp.length+added.scratch.length;
-    status(total?total+' new bracket'+(total===1?'':'s')+' generated. Existing brackets were preserved.':'No additional complete brackets can be generated from the remaining entries.');
+    state.brackets={hdcp:buildBrackets(state.bowlers,'hdcp'),scratch:buildBrackets(state.bowlers,'scratch')};state.generated=state.brackets.hdcp.length+state.brackets.scratch.length>0;state._replaceBracketDraw=true;persist();delete state._replaceBracketDraw;render();
+    const total=state.brackets.hdcp.length+state.brackets.scratch.length;
+    status(total?total+' bracket'+(total===1?'':'s')+' generated with new pairings.':'No brackets generated. At least eight different bowlers must join an event.');
   });
   const saveSection=async(section)=>{
     const brackets=section==='brackets',button=document.getElementById(brackets?'saveBrackets':'saveScores'),saveState=document.getElementById(brackets?'bracketSaveState':'scoreSaveState');
