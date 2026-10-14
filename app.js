@@ -1,3 +1,5 @@
+const bowlerNameOrder=new Intl.Collator('es',{sensitivity:'base',numeric:true});
+function alphabetical(list){return [...list].sort((a,b)=>bowlerNameOrder.compare(String(a?.name??a??'').trim(),String(b?.name??b??'').trim()));}
 const KEY = 'monster-bowling-v2';
 const LANGUAGE_KEY = 'monster-bowling-language';
 const DEFAULT_CONFIG = {hdcpBuyin:10,hdcpFirstAmount:250,hdcpSecondAmount:100,scratchBuyin:10,scratchFirstAmount:250,scratchSecondAmount:100,highBuyin:20,highPayoutAmount:250,pairsBuyin:20,pairsGamePayoutAmount:250,pairsSeriesPayoutAmount:250,pairsHighEnabled:true,pairsSeriesEnabled:true};
@@ -479,7 +481,7 @@ function calculate(state) {
 function reportSummary(data) {
   const c=data.config, result=calculate(data);
   const count=(type,id)=>(data.brackets[type]||[]).reduce((n,ids)=>n+ids.filter(x=>x===id).length,0);
-  const rows=data.bowlers.map(b=>{
+  const rows=alphabetical(data.bowlers).map(b=>{
     const h=count('hdcp',b.id), s=count('scratch',b.id);
     const paired=(data.pairs||[]).filter(ids=>ids.includes(b.id)).length;
     const charges=[
@@ -514,7 +516,7 @@ function summarizedWinnings(items) {
 function status(message) { document.getElementById('status').textContent=message;translateUI(); }
 function marked(value,winner) { return winner?'<span class="winner-circle">'+value+'</span>':String(value); }
 function renderHighGame() {
-  const players=state.bowlers.filter(b=>b.high);
+  const players=alphabetical(state.bowlers.filter(b=>b.high));
   if(!state.highGenerated) {
     document.getElementById('highNotice').innerHTML='<p class="hint">Select High Game during registration, then generate the standings.</p>';
     document.getElementById('highRows').innerHTML='';
@@ -530,10 +532,11 @@ function renderHighGame() {
   const payouts=calculate(state).awards.filter(a=>a.category==='high');
   document.getElementById('highResult').innerHTML=finished?'<h3>Pot result</h3><p>Winning game: '+marked(best,true)+'. Payout: '+payouts.map(a=>safe(players.find(b=>b.id===a.id)?.name||'Unknown')+' '+money(a.amount)).join(' · ')+'.</p>':'';
 }
+function alphabeticalTeams(teams){return alphabetical(teams.map((team,index)=>({team:alphabetical(team),index,name:alphabetical(team).map(b=>b.name).join(' & ')})));}
 function renderPairs() {
-  const interested=state.bowlers.filter(b=>b.pairs), teams=pairedTeams(state);
-  document.getElementById('registeredBowlers').innerHTML=state.bowlers.map(b=>'<option value="'+safe(b.name)+'"></option>').join('');
-  document.getElementById('teamList').innerHTML=teams.map((team,i)=>'<li>'+safe(team.map(b=>b.name).join(' & '))+' <button type="button" class="danger no-print" data-remove-pair="'+i+'">Remove team</button></li>').join('')||'<li>No Doubles teams added yet.</li>';
+  const interested=alphabetical(state.bowlers.filter(b=>b.pairs)), teams=pairedTeams(state);
+  document.getElementById('registeredBowlers').innerHTML=alphabetical(state.bowlers).map(b=>'<option value="'+safe(b.name)+'"></option>').join('');
+  document.getElementById('teamList').innerHTML=alphabeticalTeams(teams).map(({team,index:i})=>'<li>'+safe(team.map(b=>b.name).join(' & '))+' <button type="button" class="danger no-print" data-remove-pair="'+i+'">Remove team</button></li>').join('')||'<li>No Doubles teams added yet.</li>';
   const pairedIds=new Set(state.pairs.flat()), unmatched=interested.filter(b=>!pairedIds.has(b.id));
   document.getElementById('pairsNotice').innerHTML=unmatched.length?'<p class="notice">Registered for Doubles but not on a team, so not charged: '+safe(unmatched.map(b=>b.name).join(', '))+'.</p>':'';
   const ready=[1,2,3].map(g=>teams.length>0&&teams.every(t=>t.every(b=>hasGame(b,g))));
@@ -541,7 +544,7 @@ function renderPairs() {
   const finished=teams.length>0&&teams.every(t=>t.every(complete));
   const bestGameScore=finished?Math.max(...teams.map(pairBest)):null;
   const bestSeriesScore=finished?Math.max(...teams.map(pairSeries)):null;
-  document.getElementById('pairsRows').innerHTML=teams.map((team,i)=>{
+  document.getElementById('pairsRows').innerHTML=alphabeticalTeams(teams).map(({team,index:i})=>{
     const row=b=>'<tr><td>'+safe(b.name)+' (+'+b.handicap+')</td>'+[1,2,3].map(g=>'<td>'+(hasGame(b,g)?game(b,g,true):'—')+'</td>').join('')+'<td>'+(complete(b)?series(b,true):'—')+'</td></tr>';
     const total='<tr class="pair-total"><td>Combined</td>'+[1,2,3].map((g,j)=>'<td>'+(team.every(b=>hasGame(b,g))?marked(pairGame(team,g),ready[j]&&pairGame(team,g)===tops[j]):'—')+'</td>').join('')+'<td>'+(team.every(complete)?marked(pairSeries(team),finished&&state.config.pairsSeriesEnabled&&pairSeries(team)===bestSeriesScore):'—')+'</td></tr>';
     const high=team.every(complete)?'<p>Best combined game: '+marked(pairBest(team),finished&&state.config.pairsHighEnabled&&pairBest(team)===bestGameScore)+'</p>':'';
@@ -553,20 +556,20 @@ function renderPairs() {
 function render() {
   CONFIG_IDS.forEach(id=>{const el=document.getElementById(id); if(el.type==='checkbox') el.checked=!!state.config[id]; else if(document.activeElement!==el) el.value=state.config[id];});
   document.getElementById('language').value=state.language;
-  document.getElementById('rosterRows').innerHTML=state.bowlers.map(b=>'<tr><td>'+safe(b.name)+(b.membershipNumber?'<br><small>ID: '+safe(b.membershipNumber)+'</small>':'')+(b.email?'<br><small>'+safe(b.email)+'</small>':'')+'</td><td>'+b.handicap+'</td><td>'+b.hdcpCount+'</td><td>'+b.scratchCount+'</td><td>'+(b.high?'Yes':'No')+'</td><td>'+pairCount(state,b.id)+'</td><td><label class="paid-toggle"><input type="checkbox" data-paid="'+safe(b.id)+'" '+(b.paid?'checked':'')+'> Paid</label></td><td><button class="secondary" data-edit="'+safe(b.id)+'">Edit</button> <button class="danger" data-remove="'+safe(b.id)+'">Remove</button></td></tr>').join('') || '<tr><td colspan="8">No bowlers registered yet.</td></tr>';
+  document.getElementById('rosterRows').innerHTML=alphabetical(state.bowlers).map(b=>'<tr><td>'+safe(b.name)+(b.membershipNumber?'<br><small>ID: '+safe(b.membershipNumber)+'</small>':'')+(b.email?'<br><small>'+safe(b.email)+'</small>':'')+'</td><td>'+b.handicap+'</td><td>'+b.hdcpCount+'</td><td>'+b.scratchCount+'</td><td>'+(b.high?'Yes':'No')+'</td><td>'+pairCount(state,b.id)+'</td><td><label class="paid-toggle"><input type="checkbox" data-paid="'+safe(b.id)+'" '+(b.paid?'checked':'')+'> Paid</label></td><td><button class="secondary" data-edit="'+safe(b.id)+'">Edit</button> <button class="danger" data-remove="'+safe(b.id)+'">Remove</button></td></tr>').join('') || '<tr><td colspan="8">No bowlers registered yet.</td></tr>';
   for(const type of ['hdcp','scratch']) {
     document.getElementById(type+'Brackets').innerHTML=state.brackets[type].map((ids,i)=>'<div class="bracket"><div class="bracket-head"><strong>'+(type==='hdcp'?'Handicap':'Scratch')+' bracket #'+(i+1)+'</strong><button class="secondary no-print" data-download="'+type+':'+i+'">Download SVG image</button></div><div class="bracket-scroll">'+bracketGraphic(ids,type,state.bowlers,i)+'</div></div>').join('') || '<p class="hint">No brackets generated. At least eight different bowlers must select this event.</p>';
   }
-  const unused=state.bowlers.flatMap(b=>['hdcp','scratch'].map(t=>{const n=b[t+'Count']-assignedCount(t,b.id);return n>0?b.name+': '+n+' unused '+t+' '+(n===1?'spot':'spots'):null;})).filter(Boolean);
+  const unused=alphabetical(state.bowlers).flatMap(b=>['hdcp','scratch'].map(t=>{const n=b[t+'Count']-assignedCount(t,b.id);return n>0?b.name+': '+n+' unused '+t+' '+(n===1?'spot':'spots'):null;})).filter(Boolean);
   document.getElementById('bracketNotice').innerHTML=state.generated&&unused.length?'<p class="notice">Willingness above the available full brackets: '+safe(unused.join(' · '))+'</p>':'';
   const scoringIds=new Set([...state.brackets.hdcp.flat(),...state.brackets.scratch.flat(),...state.pairs.flat()].filter(Boolean)),scoringBowlers=state.bowlers.filter(b=>scoringIds.has(b.id)||b.high);
-  document.getElementById('scoreRows').innerHTML=scoringBowlers.map(b=>'<tr><td>'+safe(b.name)+' (+'+b.handicap+')</td>'+[1,2,3].map(g=>'<td><input aria-label="'+safe(b.name)+' game '+g+'" data-score="'+safe(b.id)+'" data-game="g'+g+'" type="number" min="0" max="300" step="1" value="'+(b.scores['g'+g]??'')+'"></td>').join('')+'<td>'+(complete(b)?series(b):'—')+'</td><td>'+(complete(b)?series(b,true):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No event participants.</td></tr>';
+  document.getElementById('scoreRows').innerHTML=alphabetical(scoringBowlers).map(b=>'<tr><td>'+safe(b.name)+' (+'+b.handicap+')</td>'+[1,2,3].map(g=>'<td><input aria-label="'+safe(b.name)+' game '+g+'" data-score="'+safe(b.id)+'" data-game="g'+g+'" type="number" min="0" max="300" step="1" value="'+(b.scores['g'+g]??'')+'"></td>').join('')+'<td>'+(complete(b)?series(b):'—')+'</td><td>'+(complete(b)?series(b,true):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No event participants.</td></tr>';
   document.querySelectorAll('[data-score]').forEach(input=>input.disabled=!!state.scoresLocked);
   document.getElementById('lockScores').classList.toggle('hidden',!!state.scoresLocked);
   document.getElementById('editScores').classList.toggle('hidden',!state.scoresLocked);
   document.getElementById('generate').disabled=!!state.scoresLocked;
   document.getElementById('scoreLockStatus').textContent=state.scoresLocked?'Scores are locked. Use Edit Scores to make a correction.':'Scores save automatically. Upload Scores checks that all entered scores reached the database.';
-  document.getElementById('scorePairsRows').innerHTML=pairedTeams(state).map((team,i)=>'<tr><td>Team #'+(i+1)+' — '+safe(team.map(b=>b.name).join(' & '))+'</td>'+[1,2,3].map(g=>'<td>'+(team.every(b=>hasGame(b,g))?pairGame(team,g):'—')+'</td>').join('')+'<td>'+(team.every(complete)?pairBest(team):'—')+'</td><td>'+(team.every(complete)?pairSeries(team):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No Doubles teams added yet.</td></tr>';
+  document.getElementById('scorePairsRows').innerHTML=alphabeticalTeams(pairedTeams(state)).map(({team,index:i})=>'<tr><td>Team #'+(i+1)+' — '+safe(team.map(b=>b.name).join(' & '))+'</td>'+[1,2,3].map(g=>'<td>'+(team.every(b=>hasGame(b,g))?pairGame(team,g):'—')+'</td>').join('')+'<td>'+(team.every(complete)?pairBest(team):'—')+'</td><td>'+(team.every(complete)?pairSeries(team):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No Doubles teams added yet.</td></tr>';
   renderHighGame();
   renderPairs();
   const report=reportSummary(state);
@@ -822,7 +825,7 @@ function matchupSummary(data) {
   return rounds.map(map=>[...map].map(([id,opponents])=>({id,name:names[id],opponents})).sort((a,b)=>a.name.localeCompare(b.name)));
 }
 if(typeof window!=='undefined') window.BowlingApp={
-  fresh,
+  fresh,alphabetical,
   setState(data){
     if(!data||!Array.isArray(data.bowlers)||!data.config) throw new Error('Invalid competition data');
     const language=state.language;state={...fresh(),...data,language,config:{...DEFAULT_CONFIG,...data.config}};
@@ -858,5 +861,5 @@ if(typeof window!=='undefined') window.BowlingApp={
   language:()=>state.language
 };
 if(typeof document!=='undefined') setup();
-if(typeof module!=='undefined') module.exports={fresh,buildBrackets,addTeamByNames,pairCount,bracketGraphic,match,matchupSummary,calculate,reportSummary,competitionSummary,backupPackage,validBackup,rankAwards,configured,complete,assignedCount};
+if(typeof module!=='undefined') module.exports={alphabetical,fresh,buildBrackets,addTeamByNames,pairCount,bracketGraphic,match,matchupSummary,calculate,reportSummary,competitionSummary,backupPackage,validBackup,rankAwards,configured,complete,assignedCount};
 
