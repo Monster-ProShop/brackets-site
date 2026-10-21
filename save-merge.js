@@ -5,6 +5,7 @@
   function merge(base,local,remote){
     if(!base||base._sessionId!==remote._sessionId)throw new Error('A new session was started. Your pending edits have been kept on this computer.');
     if(!same(base.brackets,remote.brackets)&&!same(local,base))throw new Error('The bracket draw changed on another device. Your pending edits have been kept on this computer.');
+    if(remote.scoresLocked&&!same(local,remote))throw new Error('The saved session is locked. Its brackets and scores have been loaded from the database. Use Edit Scores for corrections.');
     function field(b,l,r,path){
       if(same(l,b))return structuredClone(r);
       if(same(r,b)||same(l,r))return structuredClone(l);

@@ -433,7 +433,21 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
         if(!saveJob){try{localStorage.removeItem(draftKey(job.p_competition_id));}catch{}}
         if(saved.updatedAt){window.BowlingApp.setServerRevision(saved.updatedAt);if(saveJob){saveJob.p_state._serverUpdatedAt=saved.updatedAt;keepDraft(saveJob);}}
       }
-      catch (error) { saveJob = saveJob || job;keepDraft(saveJob);if($('scoreSaveState'))$('scoreSaveState').textContent='Not saved to server. '+error.message; notice('Save failed: ' + error.message + '. Your edits remain on this screen.'); break; }
+      catch (error) {
+        saveJob=saveJob||job;keepDraft(saveJob);
+        if(error.status===409||job.p_state.scoresLocked){
+          try{
+            const latest=await api('/state?id='+encodeURIComponent(job.p_competition_id));
+            if(latest?.scoresLocked){
+              localStorage.setItem(draftKey(job.p_competition_id)+':rejected:'+Date.now(),JSON.stringify(saveJob));
+              localStorage.removeItem(draftKey(job.p_competition_id));saveJob=null;serverBase=structuredClone(latest);
+              if(current?.id===job.p_competition_id)window.BowlingApp.setState(latest);
+              notice('The locked brackets and scores were reloaded from the database. Roster edits require Edit Scores.');
+              break;
+            }
+          }catch(recoveryError){console.error('Could not reload locked session:',recoveryError.message);}
+        }
+        if($('scoreSaveState'))$('scoreSaveState').textContent='Not saved to server. '+error.message; notice('Save failed: ' + error.message + '. Your edits remain on this screen.'); break; }
       notice('Saved to Neon at ' + new Date().toLocaleTimeString());
       if($('scoreSaveState'))$('scoreSaveState').textContent='Scores saved to Neon.';
     }

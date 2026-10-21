@@ -568,6 +568,8 @@ function render() {
   document.getElementById('lockScores').classList.toggle('hidden',!!state.scoresLocked);
   document.getElementById('editScores').classList.toggle('hidden',!state.scoresLocked);
   document.getElementById('generate').disabled=!!state.scoresLocked;
+  document.getElementById('saveBowler').disabled=!!state.scoresLocked;
+  document.querySelectorAll('[data-edit],[data-remove]').forEach(button=>button.disabled=!!state.scoresLocked);
   document.getElementById('scoreLockStatus').textContent=state.scoresLocked?'Scores are locked. Use Edit Scores to make a correction.':'Scores save automatically. Upload Scores checks that all entered scores reached the database.';
   document.getElementById('scorePairsRows').innerHTML=alphabeticalTeams(pairedTeams(state)).map(({team,index:i})=>'<tr><td>Team #'+(i+1)+' — '+safe(team.map(b=>b.name).join(' & '))+'</td>'+[1,2,3].map(g=>'<td>'+(team.every(b=>hasGame(b,g))?pairGame(team,g):'—')+'</td>').join('')+'<td>'+(team.every(complete)?pairBest(team):'—')+'</td><td>'+(team.every(complete)?pairSeries(team):'—')+'</td></tr>').join('')||'<tr><td colspan="6">No Doubles teams added yet.</td></tr>';
   renderHighGame();
@@ -677,6 +679,7 @@ function setup() {
   ['Hdcp','Scratch'].forEach(t=>document.getElementById('join'+t).addEventListener('change',toggleCounts));
   document.getElementById('bowlerForm').addEventListener('submit',e=>{
     e.preventDefault();
+    if(state.scoresLocked){status('Scores are locked. Use Edit Scores before changing the roster.');return;}
     const name=document.getElementById('name').value.trim(),email=document.getElementById('bowlerEmail').value.trim().toLowerCase(),handicap=Number(document.getElementById('handicap').value),profile=window.MonsterPortal?.profileForName?.(name),membershipNumber=document.getElementById('membershipNumber').value.trim()||profile?.membership_number||'';
     const hdcpCount=document.getElementById('joinHdcp').checked?Number(document.getElementById('hdcpCount').value):0;
     const scratchCount=document.getElementById('joinScratch').checked?Number(document.getElementById('scratchCount').value):0;
@@ -689,17 +692,17 @@ function setup() {
     if(email&&state.bowlers.some(b=>b.id!==editingId&&b.email===email)){status('That login email is already linked to another bowler.');return;}
     const bowler={id:editingId||profile?.id||String(Date.now())+Math.random().toString(36).slice(2),membershipNumber,name,email:email||profile?.email||'',handicap,hdcpCount,scratchCount,high:document.getElementById('joinHigh').checked,pairs:document.getElementById('joinPairs').checked||!!onTeam,scores:prior?.scores||blankScores(),paid:prior?.paid||false};
     if(prior) state.bowlers[state.bowlers.indexOf(prior)]=bowler;else state.bowlers.push(bowler);
-    // Registration changes invalidate the bracket draw; manually added teams keep their member IDs.
-    state.brackets={hdcp:[],scratch:[]};state.generated=false;
-    persist();resetForm();render();status('Bowler saved. Generate brackets again after roster changes.');
+    // Keep the saved draw. Only the explicit Generate action replaces pairings.
+    persist();resetForm();render();status('Bowler saved. Existing brackets kept. Use Generate brackets only to change the draw.');
   });
   document.getElementById('cancelEdit').addEventListener('click',resetForm);
   document.getElementById('rosterRows').addEventListener('click',e=>{
     const edit=e.target.closest('[data-edit]'),remove=e.target.closest('[data-remove]'),paid=e.target.closest('[data-paid]');
     if(paid){const b=state.bowlers.find(x=>x.id===paid.dataset.paid);if(!b)return;const previous=!!b.paid;b.paid=paid.checked;render();status('Saving payment status…');
       void (async()=>{try{if(globalThis.MONSTER_PORTAL_MODE)await globalThis.MonsterPortal.savePayment(b.id,b.paid);else localStorage.setItem(KEY,JSON.stringify(state));status(b.name+(b.paid?' marked paid. Full winnings are now payable.':' marked unpaid. Entry charges will be deducted from winnings.'));}catch(error){b.paid=previous;render();status('Payment status was not saved: '+(error.message||'Try again.'));}})();return;}
+    if((edit||remove)&&state.scoresLocked){status('Scores are locked. Use Edit Scores before changing the roster.');return;}
     if(edit){const b=state.bowlers.find(x=>x.id===edit.dataset.edit);if(!b)return;editingId=b.id;document.getElementById('name').value=b.name;document.getElementById('membershipNumber').value=b.membershipNumber||'';document.getElementById('bowlerEmail').value=b.email||'';document.getElementById('handicap').value=b.handicap;document.getElementById('joinHdcp').checked=b.hdcpCount>0;document.getElementById('joinScratch').checked=b.scratchCount>0;document.getElementById('joinHigh').checked=b.high;document.getElementById('joinPairs').checked=b.pairs;document.getElementById('hdcpCount').value=b.hdcpCount||1;document.getElementById('scratchCount').value=b.scratchCount||1;document.getElementById('saveBowler').textContent='Save changes';document.getElementById('cancelEdit').classList.remove('hidden');toggleCounts();document.getElementById('name').focus();}
-    if(remove){const b=state.bowlers.find(x=>x.id===remove.dataset.remove);if(!b||!confirm('Remove '+b.name+' and their Doubles teams?'))return;state.bowlers=state.bowlers.filter(x=>x.id!==b.id);state.brackets={hdcp:[],scratch:[]};state.generated=false;state.pairs=state.pairs.filter(ids=>!ids.includes(b.id));persist();render();status('Bowler and their Doubles teams removed. Generate brackets again.');}
+    if(remove){const b=state.bowlers.find(x=>x.id===remove.dataset.remove);if(!b)return;if([...state.brackets.hdcp.flat(),...state.brackets.scratch.flat()].includes(b.id)){status('This bowler is in saved brackets. Set their bracket entries to zero and Generate brackets before removing them.');return;}if(!confirm('Remove '+b.name+' and their Doubles teams?'))return;state.bowlers=state.bowlers.filter(x=>x.id!==b.id);state.pairs=state.pairs.filter(ids=>!ids.includes(b.id));persist();render();status('Bowler and their Doubles teams removed. Generate brackets again.');}
   });
   document.getElementById('generate').addEventListener('click',()=>{
     state.brackets={hdcp:buildBrackets(state.bowlers,'hdcp'),scratch:buildBrackets(state.bowlers,'scratch')};state.generated=state.brackets.hdcp.length+state.brackets.scratch.length>0;state._replaceBracketDraw=true;persist();delete state._replaceBracketDraw;render();
