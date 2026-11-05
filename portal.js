@@ -428,7 +428,7 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
           keepDraft(saveJob||job);
         }
         }
-        serverBase=structuredClone(job.p_state);serverBase._serverUpdatedAt=saved.updatedAt;serverBase._sessionId=saved.sessionId;delete serverBase._startNewSession;delete serverBase._replaceBracketDraw;
+        serverBase=structuredClone(job.p_state);serverBase._serverUpdatedAt=saved.updatedAt;serverBase._sessionId=saved.sessionId;delete serverBase._archiveSession;delete serverBase._startNewSession;delete serverBase._replaceBracketDraw;
         if(saved.sessionId){window.BowlingApp.setSessionId(saved.sessionId);if(saveJob){saveJob.p_state._sessionId=saved.sessionId;if(saveJob.base)saveJob.base._sessionId=saved.sessionId;if(job.p_state._startNewSession)delete saveJob.p_state._startNewSession;if(job.p_state._replaceBracketDraw&&JSON.stringify(job.p_state.brackets)===JSON.stringify(saveJob.p_state.brackets))delete saveJob.p_state._replaceBracketDraw;}}
         if(!saveJob){try{localStorage.removeItem(draftKey(job.p_competition_id));}catch{}}
         if(saved.updatedAt){window.BowlingApp.setServerRevision(saved.updatedAt);if(saveJob){saveJob.p_state._serverUpdatedAt=saved.updatedAt;keepDraft(saveJob);}}
@@ -546,13 +546,13 @@ import { createAuthClient } from 'https://esm.sh/@neondatabase/auth@0.5.0-beta?b
     const previous=window.BowlingApp.getState(),blank=window.BowlingApp.fresh();
     blank.config={...previous.config};blank.language=previous.language;
     blank.bowlers=previous.bowlers.map(bowler=>({...bowler,hdcpCount:0,scratchCount:0,high:false,pairs:false,paid:false,scores:{g1:null,g2:null,g3:null}}));
-    blank._startNewSession=true;blank._serverUpdatedAt=previous._serverUpdatedAt;blank._sessionId=previous._sessionId;
+    blank._archiveSession={label:$('sessionLabel').value.trim(),date:$('sessionDate').value};blank._startNewSession=true;blank._serverUpdatedAt=previous._serverUpdatedAt;blank._sessionId=previous._sessionId;
     try {
       window.BowlingApp.setState(blank);queueSave(blank);await flushSaves();
     } catch(error) { window.BowlingApp.setState(previous);throw error; }
     $('sessionLabel').value='';$('sessionDate').value=new Date().toLocaleDateString('en-CA');
     document.querySelector('[data-tab="registration"]').click();
-    notice('A new session is ready with the roster and handicaps preserved.');return {started:true};
+    notice('Previous session saved to history. The new session is ready.');return {started:true};
   }
   window.addEventListener('online',()=>{if(saveJob&&!saving)void drainSaves();});
   window.addEventListener('beforeunload',event=>{if(saving||saveJob){event.preventDefault();event.returnValue='';}});
